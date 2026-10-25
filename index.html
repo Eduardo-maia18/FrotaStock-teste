@@ -69,8 +69,9 @@
     <div class="fs-card">
       <div class="fs-small-logo">🚚 Frota<span>Stock</span></div>
       <h1>Acesse sua conta</h1>
-      <p class="fs-intro">Digite sua matrícula e senha para entrar no sistema.</p>
+      <p class="fs-intro">Digite seu nome, matrícula e senha para entrar no sistema.</p>
       <form id="fs-login-form">
+        <div class="fs-field"><label for="fs-nome">Nome completo</label><div class="fs-input"><span>♙</span><input id="fs-nome" autocomplete="name" placeholder="Digite seu nome completo" required maxlength="80"></div></div>
         <div class="fs-field"><label for="fs-matricula">Matrícula</label><div class="fs-input"><span>♙</span><input id="fs-matricula" autocomplete="username" placeholder="Digite sua matrícula" required maxlength="30"></div><div class="fs-hint">Protótipo de demonstração — use dados fictícios.</div></div>
         <div class="fs-field"><label for="fs-senha">Senha</label><div class="fs-input"><span>🔒</span><input id="fs-senha" type="password" autocomplete="current-password" placeholder="Digite sua senha" required><button type="button" id="fs-toggle" style="border:0;background:none;cursor:pointer" aria-label="Mostrar senha">◉</button></div></div>
         <button class="fs-button" type="submit">↪ &nbsp; Entrar no FrotaStock</button>
@@ -162,6 +163,8 @@
 <div id="modalRoot"></div>
 <script>
 const KEY='frotastock_demo_v2';
+const USER_KEY='frotastock_demo_user_v1';
+let currentUser=(()=>{try{return JSON.parse(sessionStorage.getItem(USER_KEY))||null}catch(e){return null}})();
 const seedParts=[];
 let data=loadData();
 function loadData(){try{const x=JSON.parse(localStorage.getItem(KEY));if(x&&Array.isArray(x.parts)&&Array.isArray(x.moves))return x}catch(e){}return {parts:seedParts,moves:[]}}
@@ -211,10 +214,10 @@ if(!p){
   document.querySelector('#partForm [name="cat"]').addEventListener('change',updateCode);
   updateCode();
 }
-document.getElementById('partForm').addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget;const fd=new FormData(f);const code=p?p.code:generatePartCode(fd.get('name').trim(),fd.get('cat'));if(data.parts.some(x=>x.code.toLowerCase()===code.toLowerCase()&&x.id!==id)){toast('Já existe uma peça com esse código. Tente novamente.');return}let img=p?.img||'';const file=f.elements.image.files[0];if(file){if(file.size>1.5*1024*1024){toast('A imagem deve ter até 1,5 MB neste protótipo.');return}img=await fileToDataURL(file)}const part={id:p?p.id:Math.max(0,...data.parts.map(x=>x.id))+1,name:fd.get('name').trim(),code,cat:fd.get('cat'),qty:Number(fd.get('qty')),min:Number(fd.get('min')),unit:fd.get('unit'),desc:fd.get('desc').trim(),img};if(p){const old=data.parts.find(x=>x.id===id);if(old.qty!==part.qty){data.moves.unshift({id:Date.now(),partId:id,name:part.name,code:part.code,type:part.qty>old.qty?'Entrada':'Saída',qty:Math.abs(part.qty-old.qty),before:old.qty,after:part.qty,date:new Date().toLocaleString('pt-BR'),user:'Usuário demonstrativo',note:'Ajuste realizado na edição do cadastro'})}data.parts=data.parts.map(x=>x.id===id?part:x)}else{data.parts.unshift(part)}save();closeModal();render();toast(p?'Cadastro atualizado.':'Peça cadastrada com sucesso.')})}
+document.getElementById('partForm').addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget;const fd=new FormData(f);const code=p?p.code:generatePartCode(fd.get('name').trim(),fd.get('cat'));if(data.parts.some(x=>x.code.toLowerCase()===code.toLowerCase()&&x.id!==id)){toast('Já existe uma peça com esse código. Tente novamente.');return}let img=p?.img||'';const file=f.elements.image.files[0];if(file){if(file.size>1.5*1024*1024){toast('A imagem deve ter até 1,5 MB neste protótipo.');return}img=await fileToDataURL(file)}const part={id:p?p.id:Math.max(0,...data.parts.map(x=>x.id))+1,name:fd.get('name').trim(),code,cat:fd.get('cat'),qty:Number(fd.get('qty')),min:Number(fd.get('min')),unit:fd.get('unit'),desc:fd.get('desc').trim(),img};if(p){const old=data.parts.find(x=>x.id===id);if(old.qty!==part.qty){data.moves.unshift({id:Date.now(),partId:id,name:part.name,code:part.code,type:part.qty>old.qty?'Entrada':'Saída',qty:Math.abs(part.qty-old.qty),before:old.qty,after:part.qty,date:new Date().toLocaleString('pt-BR'),user:currentUser?`${currentUser.nome} (matrícula ${currentUser.matricula})`:'Usuário não identificado',note:'Ajuste realizado na edição do cadastro'})}data.parts=data.parts.map(x=>x.id===id?part:x)}else{data.parts.unshift(part)}save();closeModal();render();toast(p?'Cadastro atualizado.':'Peça cadastrada com sucesso.')})}
 function fileToDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
 function openMoveModal(id,type){const p=data.parts.find(x=>x.id===id);if(!p)return;document.getElementById('modalRoot').innerHTML=`<div class="modalback" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px"><div class="modalhead"><h2>Registrar ${type.toLowerCase()}</h2><button class="close" onclick="closeModal()">×</button></div><div class="piece" style="margin-bottom:18px">${photo(p)}<div><strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.code)} · Saldo atual: ${p.qty}</small></div></div><form id="moveForm"><div class="formgrid"><div class="field"><label>Tipo</label><select name="type"><option ${type==='Entrada'?'selected':''}>Entrada</option><option ${type==='Saída'?'selected':''}>Saída</option></select></div><div class="field"><label>Quantidade *</label><input name="qty" type="number" min="1" step="1" required value="1"></div><div class="field span2"><label>Observação / motivo</label><input name="note" maxlength="180" placeholder="Ex.: recebimento ou ordem de manutenção"></div></div><div class="formactions"><button type="button" class="btn" onclick="closeModal()">Cancelar</button><button class="btn primary">Confirmar movimentação</button></div></form></div></div>`;
-document.getElementById('moveForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const t=fd.get('type'),n=Number(fd.get('qty'));if(!Number.isInteger(n)||n<1){toast('Informe uma quantidade inteira maior que zero.');return}const part=data.parts.find(x=>x.id===id);if(t==='Saída'&&n>part.qty){toast(`Saldo insuficiente: há apenas ${part.qty} unidade(s).`);return}const before=part.qty;part.qty+=t==='Entrada'?n:-n;data.moves.unshift({id:Date.now(),partId:id,name:part.name,code:part.code,type:t,qty:n,before,after:part.qty,date:new Date().toLocaleString('pt-BR'),user:'Usuário demonstrativo',note:fd.get('note').trim()});save();closeModal();render();toast(`${t} registrada. Novo saldo de ${part.name}: ${part.qty}.`)})}
+document.getElementById('moveForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const t=fd.get('type'),n=Number(fd.get('qty'));if(!Number.isInteger(n)||n<1){toast('Informe uma quantidade inteira maior que zero.');return}const part=data.parts.find(x=>x.id===id);if(t==='Saída'&&n>part.qty){toast(`Saldo insuficiente: há apenas ${part.qty} unidade(s).`);return}const before=part.qty;part.qty+=t==='Entrada'?n:-n;data.moves.unshift({id:Date.now(),partId:id,name:part.name,code:part.code,type:t,qty:n,before,after:part.qty,date:new Date().toLocaleString('pt-BR'),user:currentUser?`${currentUser.nome} (matrícula ${currentUser.matricula})`:'Usuário não identificado',note:fd.get('note').trim()});save();closeModal();render();toast(`${t} registrada. Novo saldo de ${part.name}: ${part.qty}.`)})}
 function closeModal(){document.getElementById('modalRoot').innerHTML=''}
 function exportCSV(){const rows=[['Data','Peça','Código','Movimentação','Quantidade','Saldo anterior','Saldo posterior','Usuário','Observação'],...data.moves.map(m=>[m.date,m.name,m.code,m.type,m.qty,m.before,m.after,m.user,m.note])];const csv=rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join('\r\n');const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='frotastock-historico.csv';a.click();URL.revokeObjectURL(a.href)}
 
@@ -268,6 +271,9 @@ function printRCProof(){if(!document.getElementById('rcProof').innerHTML.trim())
  const overlay=document.getElementById('fs-login');
  const form=document.getElementById('fs-login-form');
  const msg=document.getElementById('fs-msg');
+ const nomeInput=document.getElementById('fs-nome');
+ const matriculaInput=document.getElementById('fs-matricula');
+ if(currentUser){nomeInput.value=currentUser.nome||'';matriculaInput.value=currentUser.matricula||'';}
  document.getElementById('fs-toggle').addEventListener('click',function(){
    const p=document.getElementById('fs-senha'); p.type=p.type==='password'?'text':'password';
    this.textContent=p.type==='password'?'◉':'◎';
@@ -278,6 +284,8 @@ function printRCProof(){if(!document.getElementById('rcProof').innerHTML.trim())
  form.addEventListener('submit',function(e){
    e.preventDefault();
    if(!form.reportValidity()) return;
+   currentUser={nome:nomeInput.value.trim(),matricula:matriculaInput.value.trim()};
+   try{sessionStorage.setItem(USER_KEY,JSON.stringify(currentUser));}catch(err){}
    overlay.style.display='none';
    document.body.style.overflow='auto';
  });
