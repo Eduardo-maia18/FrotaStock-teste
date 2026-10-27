@@ -52,6 +52,9 @@
 
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -72,7 +75,7 @@
       <p class="fs-intro">Digite seu nome, matrícula e senha para entrar no sistema.</p>
       <form id="fs-login-form">
         <div class="fs-field"><label for="fs-nome">Nome completo</label><div class="fs-input"><span>♙</span><input id="fs-nome" autocomplete="name" placeholder="Digite seu nome completo" required maxlength="80"></div></div>
-        <div class="fs-field"><label for="fs-matricula">Matrícula</label><div class="fs-input"><span>♙</span><input id="fs-matricula" autocomplete="username" placeholder="Digite sua matrícula" required maxlength="30"></div><div class="fs-hint">Protótipo de demonstração — use dados fictícios.</div></div>
+        <div class="fs-field"><label for="fs-matricula">E-mail cadastrado no Firebase</label><div class="fs-input"><span>✉</span><input id="fs-matricula" type="email" autocomplete="username" placeholder="seuemail@exemplo.com" required maxlength="120"></div><div class="fs-hint">Use o e-mail do usuário de teste criado em Authentication → Users.</div></div>
         <div class="fs-field"><label for="fs-senha">Senha</label><div class="fs-input"><span>🔒</span><input id="fs-senha" type="password" autocomplete="current-password" placeholder="Digite sua senha" required><button type="button" id="fs-toggle" style="border:0;background:none;cursor:pointer" aria-label="Mostrar senha">◉</button></div></div>
         <button class="fs-button" type="submit">↪ &nbsp; Entrar no FrotaStock</button>
       </form>
@@ -84,7 +87,7 @@
     <h2>Uma gestão de frota mais organizada</h2>
     <div class="fs-right-item"><div class="fs-round">♙</div><div><b>Acesso individual</b><p>Na versão real, cada funcionário terá sua própria conta.</p></div></div>
     <div class="fs-right-item"><div class="fs-round">↔</div><div><b>Histórico de movimentações</b><p>Acompanhe entradas, saídas e conferências em um só lugar.</p></div></div>
-    <div class="fs-warning"><b>⚠ Protótipo visual</b><p>Esta tela ainda não valida usuários ou senhas. Ao clicar em entrar, ela apenas abre o site para demonstração.</p><p>Não use senhas reais nem dados confidenciais da empresa.</p></div>
+    <div class="fs-warning"><b>⚠ Protótipo visual</b><p>Esta cópia de teste valida o acesso pelo Firebase Authentication. Não use dados reais da empresa até concluir os testes e proteger as regras do banco.</p><p>Não use senhas reais nem dados confidenciais da empresa.</p></div>
   </aside>
 </div>
 
@@ -188,13 +191,47 @@
 </div>
 <div id="modalRoot"></div>
 <script>
-const KEY='frotastock_demo_v2';
+const KEY='frotastock_demo_v2_firebase_test';
 const USER_KEY='frotastock_demo_user_v1';
 let currentUser=(()=>{try{return JSON.parse(sessionStorage.getItem(USER_KEY))||null}catch(e){return null}})();
 const seedParts=[];
 let data=loadData();
+let cloudReady=false, cloudApplying=false, cloudWriteTimer=null, cloudUnsubscribe=null;
 function loadData(){try{const x=JSON.parse(localStorage.getItem(KEY));if(x&&Array.isArray(x.parts)&&Array.isArray(x.moves))return x}catch(e){}return {parts:seedParts,moves:[]}}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){toast('Não foi possível salvar. A imagem pode ser grande demais; tente uma imagem menor.');}}
+function save(){
+ try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){toast('Não foi possível salvar localmente. A imagem pode ser grande demais; tente uma imagem menor.');}
+ if(cloudReady && !cloudApplying){clearTimeout(cloudWriteTimer);cloudWriteTimer=setTimeout(syncDataToCloud,500)}
+}
+function cloudSafeData(){
+ // Fotos e documentos continuam locais nesta primeira etapa; não enviar Data URLs ao Firestore.
+ return {parts:data.parts.map(p=>{const {img,documents,...core}=p;return core}),moves:data.moves};
+}
+async function syncDataToCloud(){
+ if(!cloudReady||!firebase.auth().currentUser)return;
+ try{await firebase.firestore().collection('appData').doc('main').set({...cloudSafeData(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:firebase.auth().currentUser.uid});}
+ catch(err){console.error(err);toast('Não foi possível sincronizar com a nuvem. Confira as regras do Firestore e a conexão.');}
+}
+function mergeCloudData(remote){
+ const localParts=data.parts;
+ const remoteParts=Array.isArray(remote.parts)?remote.parts:[];
+ data.parts=remoteParts.map(r=>{const local=localParts.find(p=>p.id===r.id);return {...r,img:local?.img||'',documents:local?.documents||[]}});
+ data.moves=Array.isArray(remote.moves)?remote.moves:[];
+ cloudApplying=true;try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){};render();cloudApplying=false;
+}
+async function startCloudSync(){
+ const db=firebase.firestore();const ref=db.collection('appData').doc('main');
+ try{
+  const snap=await ref.get();
+  if(snap.exists){mergeCloudData(snap.data())}
+  else {await ref.set({...cloudSafeData(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:firebase.auth().currentUser.uid});}
+  cloudReady=true;
+  if(cloudUnsubscribe)cloudUnsubscribe();
+  cloudUnsubscribe=ref.onSnapshot(s=>{if(s.exists && s.metadata.hasPendingWrites===false)mergeCloudData(s.data())},err=>{console.error(err);toast('Falha ao acompanhar as alterações da nuvem. Verifique as regras do Firestore.')});
+  document.querySelector('.profile strong').textContent=firebase.auth().currentUser.email||'Usuário autenticado';
+  document.querySelector('.profile small').textContent='Conectado ao Firebase';
+  toast('Login realizado. Estoque conectado à nuvem. Fotos e documentos continuam locais nesta versão de teste.');
+ }catch(err){console.error(err);cloudReady=false;toast('Login realizado, mas o banco recusou o acesso. Confira as regras do Firestore.');}
+}
 function generatePartCode(name,cat){
   const normalized=String(name||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toUpperCase();
   const firstWord=(normalized.match(/[A-Z0-9]+/)||['PEC'])[0];
@@ -297,27 +334,49 @@ function buildRCProof(){
 }
 function printRCProof(){if(!document.getElementById('rcProof').innerHTML.trim()){toast('Gere o comprovante antes de imprimir.');return}const proof=document.getElementById('rcProof').innerHTML;const w=window.open('','_blank');if(!w){toast('O navegador bloqueou a janela de impressão. Permita pop-ups para este site e tente novamente.');return}w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Comprovante RC ${escapeHTML(rcCurrentNumber)}</title><style>body{font:13px Arial,sans-serif;color:#17251f;padding:22px}h2{color:#174d36}table{width:100%;border-collapse:collapse;margin-top:16px}th{background:#174d36;color:#fff;text-align:left}td,th{padding:8px;border:1px solid #cbd5ce;font-size:11px}tr:nth-child(even){background:#f7faf8}.rcgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.rcsummary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0}.rcmetric{border:1px solid #d8e3dc;padding:10px}.rcmetric small{display:block;color:#52645a}.rcmetric strong{font-size:20px}.rcstatus.ok{color:#176b45}.rcstatus.bad{color:#b33434}.rcstatus.warn{color:#9b6510}.rc-help{font-size:10px;color:#52645a}@media print{button{display:none}}</style></head><body>${proof}<script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
 
+// Firebase Authentication + sincronização de dados de teste
+const firebaseConfig = {
+ apiKey: "AIzaSyANbYHWql-Xko-JpcZCtdlsbbyAMHCaAsc",
+ authDomain: "frotastock-teste.firebaseapp.com",
+ projectId: "frotastock-teste",
+ storageBucket: "frotastock-teste.firebasestorage.app",
+ messagingSenderId: "997787818445",
+ appId: "1:997787818445:web:3a02972e31d287992e0c84"
+};
+firebase.initializeApp(firebaseConfig);
 (function(){
  const overlay=document.getElementById('fs-login');
  const form=document.getElementById('fs-login-form');
  const msg=document.getElementById('fs-msg');
  const nomeInput=document.getElementById('fs-nome');
- const matriculaInput=document.getElementById('fs-matricula');
- if(currentUser){nomeInput.value=currentUser.nome||'';matriculaInput.value=currentUser.matricula||'';}
- document.getElementById('fs-toggle').addEventListener('click',function(){
-   const p=document.getElementById('fs-senha'); p.type=p.type==='password'?'text':'password';
-   this.textContent=p.type==='password'?'◉':'◎';
+ const emailInput=document.getElementById('fs-matricula');
+ const passwordInput=document.getElementById('fs-senha');
+ document.getElementById('fs-toggle').addEventListener('click',function(){passwordInput.type=passwordInput.type==='password'?'text':'password';this.textContent=passwordInput.type==='password'?'◉':'◎'});
+ document.getElementById('fs-forgot').addEventListener('click',async function(){
+   const email=emailInput.value.trim();
+   if(!email){msg.style.display='block';msg.textContent='Digite primeiro o e-mail cadastrado no Firebase para receber o link de recuperação.';emailInput.focus();return}
+   try{await firebase.auth().sendPasswordResetEmail(email);msg.style.display='block';msg.textContent='Se o e-mail estiver cadastrado, o Firebase enviará as instruções de recuperação.'}
+   catch(err){msg.style.display='block';msg.textContent='Não foi possível solicitar a recuperação. Confira o e-mail e as configurações do Firebase.';console.error(err)}
  });
- document.getElementById('fs-forgot').addEventListener('click',function(){
-   msg.style.display='block'; msg.textContent='Na versão real, a recuperação de senha será feita pelo administrador autorizado. Esta demonstração não envia e-mails nem redefine senhas.';
+ form.addEventListener('submit',async function(e){
+   e.preventDefault();if(!form.reportValidity())return;
+   const email=emailInput.value.trim();const password=passwordInput.value;
+   const submit=form.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent='Conectando…';msg.style.display='none';
+   try{
+    await firebase.auth().signInWithEmailAndPassword(email,password);
+    currentUser={nome:nomeInput.value.trim()||email,matricula:email,email};
+    try{sessionStorage.setItem(USER_KEY,JSON.stringify(currentUser))}catch(err){}
+    overlay.style.display='none';document.body.style.overflow='auto';
+    await startCloudSync();render();
+   }catch(err){msg.style.display='block';msg.textContent=err.code==='auth/invalid-credential'||err.code==='auth/wrong-password'||err.code==='auth/user-not-found'?'E-mail ou senha incorretos. Confira o usuário criado no Firebase.':'Não foi possível entrar. Verifique a conexão e se o provedor E-mail/senha está ativado.';console.error(err)}
+   finally{submit.disabled=false;submit.innerHTML='↪ &nbsp; Entrar no FrotaStock'}
  });
- form.addEventListener('submit',function(e){
-   e.preventDefault();
-   if(!form.reportValidity()) return;
-   currentUser={nome:nomeInput.value.trim(),matricula:matriculaInput.value.trim()};
-   try{sessionStorage.setItem(USER_KEY,JSON.stringify(currentUser));}catch(err){}
-   overlay.style.display='none';
-   document.body.style.overflow='auto';
+ firebase.auth().onAuthStateChanged(async user=>{
+   if(user){
+    overlay.style.display='none';document.body.style.overflow='auto';
+    if(!currentUser)currentUser={nome:user.email||'Usuário',matricula:user.email||'',email:user.email||''};
+    await startCloudSync();
+   }else{overlay.style.display='grid';document.body.style.overflow='hidden';cloudReady=false;if(cloudUnsubscribe){cloudUnsubscribe();cloudUnsubscribe=null}}
  });
 })();
 
