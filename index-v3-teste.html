@@ -284,8 +284,8 @@ async function commitStockMovement(partId,type,quantity,note=''){
   const after=before+(type==='Entrada'?quantity:-quantity);
   const now=new Date().toLocaleString('pt-BR');
   const who=currentUser?currentUser.nome+(currentUser.matricula?' (matrícula '+currentUser.matricula+')':''):user.email||'Usuário';
-  const movement={id:Date.now(),partId:remote.id,name:remote.name,code:remote.code,type,qty:quantity,before,after,date:now,user:who,userID:user.uid,note:String(note||''),migrationSource:'appData/main',migrationVersion:1,v3:true};
-  tx.update(partRef,{qty:after,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:user.uid});
+  const movement={id:Date.now(),movementId:moveRef.id,partId:remote.id,partDocId:partRef.id,name:remote.name,code:remote.code,type,qty:quantity,before,after,date:now,user:who,userID:user.uid,note:String(note||''),migrationSource:'appData/main',migrationVersion:1,v3:true};
+  tx.update(partRef,{qty:after,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:user.uid,lastMovementId:moveRef.id});
   tx.set(moveRef,movement);
   return {before,after,movement};
  });
