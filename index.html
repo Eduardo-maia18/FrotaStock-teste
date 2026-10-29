@@ -376,19 +376,42 @@ firebase.initializeApp(firebaseConfig);
    const submit=form.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent='Conectando…';msg.style.display='none';
    try{
     await firebase.auth().signInWithEmailAndPassword(email,password);
-    currentUser={nome:nomeInput.value.trim()||email,matricula:email,email};
-    try{sessionStorage.setItem(USER_KEY,JSON.stringify(currentUser))}catch(err){}
-    overlay.style.display='none';document.body.style.overflow='auto';
-    await startCloudSync();render();
+    // O onAuthStateChanged valida o perfil no Firestore antes de abrir o sistema.
    }catch(err){msg.style.display='block';msg.textContent=err.code==='auth/invalid-credential'||err.code==='auth/wrong-password'||err.code==='auth/user-not-found'?'E-mail ou senha incorretos. Confira o usuário criado no Firebase.':'Não foi possível entrar. Verifique a conexão e se o provedor E-mail/senha está ativado.';console.error(err)}
    finally{submit.disabled=false;submit.innerHTML='↪ &nbsp; Entrar no FrotaStock'}
  });
  firebase.auth().onAuthStateChanged(async user=>{
    if(user){
-    overlay.style.display='none';document.body.style.overflow='auto';
-    if(!currentUser)currentUser={nome:user.email||'Usuário',matricula:user.email||'',email:user.email||''};
-    await startCloudSync();
-   }else{overlay.style.display='grid';document.body.style.overflow='hidden';cloudReady=false;if(cloudUnsubscribe){cloudUnsubscribe();cloudUnsubscribe=null}}
+    overlay.style.display='grid';document.body.style.overflow='hidden';
+    cloudReady=false;
+    try{
+     const profileSnap=await firebase.firestore().collection('users').doc(user.uid).get();
+     if(!profileSnap.exists)throw new Error('PROFILE_NOT_FOUND');
+     const profile=profileSnap.data()||{};
+     if(profile.ativo!==true)throw new Error('PROFILE_INACTIVE');
+     const role=String(profile.perfil||'').toLowerCase();
+     if(role!=='gestor' && role!=='supervisor')throw new Error('PROFILE_ROLE_INVALID');
+     if(role!=='gestor')throw new Error('SUPERVISOR_NOT_ENABLED_YET');
+     currentUser={nome:profile.nome||user.email||'Gestor',matricula:profile.matricula||user.email||'',email:user.email||'',uid:user.uid,perfil:role};
+     try{sessionStorage.setItem(USER_KEY,JSON.stringify(currentUser))}catch(err){}
+     overlay.style.display='none';document.body.style.overflow='auto';
+     await startCloudSync();
+     const profileSmall=document.querySelector('.profile small');
+     if(profileSmall)profileSmall.textContent='Gestor · Conectado ao Firebase';
+    }catch(err){
+     console.error('Falha na validação do perfil:',err);
+     cloudReady=false;
+     await firebase.auth().signOut();
+     overlay.style.display='grid';document.body.style.overflow='hidden';
+     msg.style.display='block';
+     msg.textContent=err.message==='PROFILE_NOT_FOUND'?'Acesso não autorizado: seu usuário ainda não possui cadastro na coleção users.':err.message==='PROFILE_INACTIVE'?'Acesso bloqueado: usuário inativo.':err.message==='SUPERVISOR_NOT_ENABLED_YET'?'Perfil de supervisor identificado, mas o acesso de supervisor ainda está em desenvolvimento.':'Não foi possível validar seu perfil no Firestore. Confira a conexão e as regras.';
+    }
+   }else{
+    overlay.style.display='grid';document.body.style.overflow='hidden';cloudReady=false;
+    currentUser=null;
+    try{sessionStorage.removeItem(USER_KEY)}catch(err){}
+    if(cloudUnsubscribe){cloudUnsubscribe();cloudUnsubscribe=null}
+   }
  });
 })();
 
