@@ -404,7 +404,9 @@ firebase.initializeApp(firebaseConfig);
      await firebase.auth().signOut();
      overlay.style.display='grid';document.body.style.overflow='hidden';
      msg.style.display='block';
-     msg.textContent=err.message==='PROFILE_NOT_FOUND'?'Acesso não autorizado: seu usuário ainda não possui cadastro na coleção users.':err.message==='PROFILE_INACTIVE'?'Acesso bloqueado: usuário inativo.':err.message==='SUPERVISOR_NOT_ENABLED_YET'?'Perfil de supervisor identificado, mas o acesso de supervisor ainda está em desenvolvimento.':'Não foi possível validar seu perfil no Firestore. Confira a conexão e as regras.';
+     const firebaseCode=err&&err.code?String(err.code):'sem-codigo';
+      const firebaseMessage=err&&err.message?String(err.message):String(err||'Erro desconhecido');
+      msg.textContent=err.message==='PROFILE_NOT_FOUND'?'Acesso não autorizado: seu usuário ainda não possui cadastro na coleção users.':err.message==='PROFILE_INACTIVE'?'Acesso bloqueado: usuário inativo.':err.message==='SUPERVISOR_NOT_ENABLED_YET'?'Perfil de supervisor identificado, mas o acesso de supervisor ainda está em desenvolvimento.':`Falha ao validar perfil no Firestore. Código: ${firebaseCode}. Detalhe: ${firebaseMessage}`;
     }
    }else{
     overlay.style.display='grid';document.body.style.overflow='hidden';cloudReady=false;
