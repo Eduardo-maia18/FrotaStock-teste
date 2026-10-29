@@ -226,7 +226,7 @@ async function startCloudSync(){
   // V3 nesta etapa lê exclusivamente os registros migrados. Nenhuma gravação na nuvem é habilitada.
   const [partsSnap,movesSnap]=await Promise.all([partsRef.get(),movesRef.get()]);
   const localParts=data.parts;
-  const remoteParts=partsSnap.docs.map(doc=>doc.data());
+  const remoteParts=partsSnap.docs.map(doc=>({...doc.data(),_docId:doc.id}));
   data.parts=remoteParts.map(r=>{
    const local=localParts.find(p=>String(p.id)===String(r.id));
    return {...r,img:local?.img||'',documents:local?.documents||[]};
@@ -244,7 +244,7 @@ async function startCloudSync(){
    const local=data.parts;
    data.parts=latestParts.docs.map(doc=>{
     const r=doc.data(),p=local.find(x=>String(x.id)===String(r.id));
-    return {...r,img:p?.img||'',documents:p?.documents||[]};
+    return {...r,_docId:doc.id,img:p?.img||'',documents:p?.documents||[]};
    });
    data.moves=latestMoves.docs.map(doc=>doc.data()).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
    cloudApplying=true;
@@ -264,6 +264,32 @@ async function startCloudSync(){
   toast('Não foi possível carregar parts_v2 / movements_v2. Nenhum dado foi gravado.');
   throw err;
  }
+}
+// Gravação transacional preparada para a V3. Só deve ser habilitada depois de publicar e validar as regras Firestore específicas.
+async function commitStockMovement(partId,type,quantity,note=''){
+ if(!['Entrada','Saída'].includes(type))throw new Error('Tipo de movimentação inválido.');
+ if(!Number.isInteger(quantity)||quantity<1)throw new Error('Quantidade inválida.');
+ const part=data.parts.find(p=>String(p.id)===String(partId));
+ if(!part||!part._docId)throw new Error('Peça sem vínculo com o documento do Firestore.');
+ const user=firebase.auth().currentUser;
+ if(!user)throw new Error('Sessão expirada. Entre novamente.');
+ const db=firebase.firestore(),partRef=db.collection('parts_v2').doc(part._docId);
+ const moveRef=db.collection('movements_v2').doc('v3_'+Date.now()+'_'+Math.random().toString(36).slice(2,8));
+ const result=await db.runTransaction(async tx=>{
+  const snap=await tx.get(partRef);
+  if(!snap.exists)throw new Error('Peça não encontrada na nuvem.');
+  const remote=snap.data(),before=Number(remote.qty);
+  if(!Number.isInteger(before)||before<0)throw new Error('Saldo inválido no banco.');
+  if(type==='Saída'&&quantity>before)throw new Error('Saldo insuficiente. Saldo atual: '+before+'.');
+  const after=before+(type==='Entrada'?quantity:-quantity);
+  const now=new Date().toLocaleString('pt-BR');
+  const who=currentUser?currentUser.nome+(currentUser.matricula?' (matrícula '+currentUser.matricula+')':''):user.email||'Usuário';
+  const movement={id:Date.now(),partId:remote.id,name:remote.name,code:remote.code,type,qty:quantity,before,after,date:now,user:who,userID:user.uid,note:String(note||''),migrationSource:'appData/main',migrationVersion:1,v3:true};
+  tx.update(partRef,{qty:after,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:user.uid});
+  tx.set(moveRef,movement);
+  return {before,after,movement};
+ });
+ return result;
 }
 function generatePartCode(name,cat){
   const normalized=String(name||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toUpperCase();
